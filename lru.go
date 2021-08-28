@@ -1,3 +1,4 @@
+// Package lru implements an LRU cache.
 package lru
 
 import (
@@ -5,22 +6,34 @@ import (
 	"sync"
 )
 
-// cache is an LRU cache. It is not safe for concurrent access.
-type cache struct {
-	maxEntries int
+// Nut is an LRU cache. It is not safe for concurrent access.
+type Nut struct {
+	// MaxEntries is the maximum number of cache entries before
+	// an item is evicted. Zero means no limit.
+	MaxEntries int
 	ll         *list.List
 	cache      map[interface{}]*list.Element
 }
 
+// NewNut creates a new Cache. If maxEntries is zero, the cache has no limit.
+func NewNut(maxEntries int) *Nut {
+	return &Nut{
+		MaxEntries: maxEntries,
+		ll:         list.New(),
+		cache:      make(map[interface{}]*list.Element),
+	}
+}
+
+// A Key may be any value that is comparable. See http://golang.org/ref/spec#Comparison_operators
 type Key interface{}
-type Value interface{}
 
 type entry struct {
 	key   Key
-	value Value
+	value interface{}
 }
 
-func (c *cache) set(key Key, value Value) {
+// Set adds a value to the cache.
+func (c *Nut) Set(key Key, value interface{}) {
 	if c.cache == nil {
 		c.cache = make(map[interface{}]*list.Element)
 		c.ll = list.New()
@@ -32,12 +45,13 @@ func (c *cache) set(key Key, value Value) {
 	}
 	ele := c.ll.PushFront(&entry{key, value})
 	c.cache[key] = ele
-	if c.maxEntries != 0 && c.ll.Len() > c.maxEntries {
+	if c.MaxEntries != 0 && c.ll.Len() > c.MaxEntries {
 		c.removeOldest()
 	}
 }
 
-func (c *cache) get(key Key) (value Value, ok bool) {
+// Get looks up a key's value from the cache.
+func (c *Nut) Get(key Key) (value interface{}, ok bool) {
 	if c.cache == nil {
 		return
 	}
@@ -48,7 +62,8 @@ func (c *cache) get(key Key) (value Value, ok bool) {
 	return
 }
 
-func (c *cache) del(key Key) {
+// Del removes the provided key from the cache.
+func (c *Nut) Del(key Key) {
 	if c.cache == nil {
 		return
 	}
@@ -57,7 +72,7 @@ func (c *cache) del(key Key) {
 	}
 }
 
-func (c *cache) removeOldest() {
+func (c *Nut) removeOldest() {
 	if c.cache == nil {
 		return
 	}
@@ -67,67 +82,66 @@ func (c *cache) removeOldest() {
 	}
 }
 
-func (c *cache) removeElement(e *list.Element) {
+func (c *Nut) removeElement(e *list.Element) {
 	c.ll.Remove(e)
 	kv := e.Value.(*entry)
 	delete(c.cache, kv.key)
 }
 
-func (c *cache) len() int {
+// Len returns the number of items in the cache.
+func (c *Nut) Len() int {
 	if c.cache == nil {
 		return 0
 	}
 	return c.ll.Len()
 }
 
-// Cache is an LRU cache. It is safe for concurrent access.
-type Cache struct {
-	inner cache
-	mutex sync.Mutex
+// Lru is an LRU cache.
+type Lru struct {
+	// MaxEntries is the maximum number of cache entries before
+	// an item is evicted. Zero means no limit.
+	MaxEntries int
+	inner      Nut
+	mutex      sync.Mutex
 }
 
 // Set adds a value to the cache.
-func (c *Cache) Set(key Key, value Value) {
+func (c *Lru) Set(key Key, value interface{}) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.inner.set(key, value)
+	c.inner.Set(key, value)
 }
 
 // Get looks up a key's value from the cache.
-func (c *Cache) Get(key Key) (Value, bool) {
+func (c *Lru) Get(key Key) (interface{}, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	return c.inner.get(key)
+	return c.inner.Get(key)
 }
 
 // Del removes the provided key from the cache.
-func (c *Cache) Del(key Key) {
+func (c *Lru) Del(key Key) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.inner.del(key)
+	c.inner.Del(key)
 }
 
 // Len returns the number of items in the cache.
-func (c *Cache) Len() int {
+func (c *Lru) Len() int {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	return c.inner.len()
+	return c.inner.Len()
 }
 
-// New creates a new Cache.
-// If maxEntries is zero, the cache has no limit.
-func New(maxEntries int) *Cache {
-	return &Cache{
-		inner: cache{
-			maxEntries: maxEntries,
+// NewLru creates a new Cache. If maxEntries is zero, the cache has no limit.
+func NewLru(maxEntries int) *Lru {
+	return &Lru{
+		MaxEntries: maxEntries,
+		inner: Nut{
+			MaxEntries: maxEntries,
 			ll:         list.New(),
 			cache:      make(map[interface{}]*list.Element),
 		},
 		mutex: sync.Mutex{},
 	}
-}
-
-// Alias for New.
-func Lru(maxEntries int) *Cache {
-	return New(maxEntries)
 }
