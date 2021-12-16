@@ -96,12 +96,17 @@ func (c *Nut) Len() int {
 	return c.ll.Len()
 }
 
+// Clr all.
+func (c *Nut) Clr() {
+	c.cache = nil
+}
+
 // Lru is an LRU cache.
 type Lru struct {
 	// MaxEntries is the maximum number of cache entries before
 	// an item is evicted. Zero means no limit.
 	MaxEntries int
-	inner      Nut
+	inner      *Nut
 	mutex      sync.Mutex
 }
 
@@ -133,15 +138,18 @@ func (c *Lru) Len() int {
 	return c.inner.Len()
 }
 
+// Clr all
+func (c *Lru) Clr() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.inner.Clr()
+}
+
 // NewLru creates a new Cache. If maxEntries is zero, the cache has no limit.
 func NewLru(maxEntries int) *Lru {
 	return &Lru{
 		MaxEntries: maxEntries,
-		inner: Nut{
-			MaxEntries: maxEntries,
-			ll:         list.New(),
-			cache:      make(map[interface{}]*list.Element),
-		},
-		mutex: sync.Mutex{},
+		inner:      NewNut(maxEntries),
+		mutex:      sync.Mutex{},
 	}
 }
