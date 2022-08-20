@@ -1,155 +1,117 @@
 // Package lru implements an LRU cache.
 package lru
 
-import (
-	"container/list"
-	"sync"
-)
-
-// Nut is an LRU cache. It is not safe for concurrent access.
-type Nut struct {
-	// MaxEntries is the maximum number of cache entries before
-	// an item is evicted. Zero means no limit.
-	MaxEntries int
-	ll         *list.List
-	cache      map[any]*list.Element
+// Elem is an element of a linked list.
+type Elem[K comparable, V any] struct {
+	Next, Prev *Elem[K, V]
+	K          K
+	V          V
 }
 
-// NewNut creates a new Cache. If maxEntries is zero, the cache has no limit.
-func NewNut(maxEntries int) *Nut {
-	return &Nut{
-		MaxEntries: maxEntries,
-		ll:         list.New(),
-		cache:      make(map[any]*list.Element),
-	}
+// List represents a doubly linked list.
+type List[K comparable, V any] struct {
+	Root Elem[K, V]
+	Size int
 }
 
-// A Key may be any value that is comparable. See http://golang.org/ref/spec#Comparison_operators
-type Key any
-
-type entry struct {
-	key   Key
-	value any
+// Init initializes or clears list l.
+func (l *List[K, V]) Init() *List[K, V] {
+	l.Root.Next = &l.Root
+	l.Root.Prev = &l.Root
+	l.Size = 0
+	return l
 }
 
-// Set adds a value to the cache.
-func (c *Nut) Set(key Key, value any) {
-	if c.cache == nil {
-		c.cache = make(map[any]*list.Element)
-		c.ll = list.New()
-	}
-	if ee, ok := c.cache[key]; ok {
-		c.ll.MoveToFront(ee)
-		ee.Value.(*entry).value = value
+// Insert inserts e after at, increments l.len, and returns e.
+func (l *List[K, V]) Insert(e, at *Elem[K, V]) *Elem[K, V] {
+	e.Prev = at
+	e.Next = at.Next
+	e.Prev.Next = e
+	e.Next.Prev = e
+	l.Size++
+	return e
+}
+
+// Move moves e to next to at.
+func (l *List[K, V]) Move(e, at *Elem[K, V]) {
+	if e == at || e == at.Next {
 		return
 	}
-	ele := c.ll.PushFront(&entry{key, value})
-	c.cache[key] = ele
-	if c.MaxEntries != 0 && c.ll.Len() > c.MaxEntries {
-		c.removeOldest()
+	e.Prev.Next = e.Next
+	e.Next.Prev = e.Prev
+	e.Prev = at
+	e.Next = at.Next
+	e.Prev.Next = e
+	e.Next.Prev = e
+}
+
+// Remove removes e from its list, decrements l.len
+func (l *List[K, V]) Remove(e *Elem[K, V]) {
+	e.Prev.Next = e.Next
+	e.Next.Prev = e.Prev
+	e.Prev = nil // avoid memory leaks
+	e.Next = nil // avoid memory leaks
+	l.Size--
+}
+
+// Lru cache. It is not safe for concurrent access.
+type Lru[K comparable, V any] struct {
+	// Size is the maximum number of cache entries before
+	// an item is evicted. Zero means no limit.
+	Size int
+	List *List[K, V]
+	C    map[K]*Elem[K, V]
+}
+
+func (l *Lru[K, V]) Set(k K, v V) {
+	if e, ok := l.C[k]; ok {
+		l.List.Move(e, &l.List.Root)
+		e.K = k
+		e.V = v
+		return
+	}
+	l.C[k] = l.List.Insert(&Elem[K, V]{K: k, V: v}, &l.List.Root)
+	if l.List.Size > l.Size {
+		delete(l.C, l.List.Root.Prev.K)
+		l.List.Remove(l.List.Root.Prev)
 	}
 }
 
 // Get looks up a key's value from the cache.
-func (c *Nut) Get(key Key) (value any, ok bool) {
-	if c.cache == nil {
-		return
-	}
-	if ele, hit := c.cache[key]; hit {
-		c.ll.MoveToFront(ele)
-		return ele.Value.(*entry).value, true
+func (l *Lru[K, V]) GetExists(k K) (v V, ok bool) {
+	var e *Elem[K, V]
+	e, ok = l.C[k]
+	if ok {
+		l.List.Move(e, &l.List.Root)
+		v = e.V
 	}
 	return
 }
 
-// Del removes the provided key from the cache.
-func (c *Nut) Del(key Key) {
-	if c.cache == nil {
-		return
-	}
-	if ele, hit := c.cache[key]; hit {
-		c.removeElement(ele)
-	}
-}
-
-func (c *Nut) removeOldest() {
-	if c.cache == nil {
-		return
-	}
-	ele := c.ll.Back()
-	if ele != nil {
-		c.removeElement(ele)
-	}
-}
-
-func (c *Nut) removeElement(e *list.Element) {
-	c.ll.Remove(e)
-	kv := e.Value.(*entry)
-	delete(c.cache, kv.key)
-}
-
-// Len returns the number of items in the cache.
-func (c *Nut) Len() int {
-	if c.cache == nil {
-		return 0
-	}
-	return c.ll.Len()
-}
-
-// Clr all.
-func (c *Nut) Clr() {
-	c.cache = nil
-}
-
-// Lru is an LRU cache.
-type Lru struct {
-	// MaxEntries is the maximum number of cache entries before
-	// an item is evicted. Zero means no limit.
-	MaxEntries int
-	inner      *Nut
-	mutex      sync.Mutex
-}
-
-// Set adds a value to the cache.
-func (c *Lru) Set(key Key, value any) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.inner.Set(key, value)
-}
-
 // Get looks up a key's value from the cache.
-func (c *Lru) Get(key Key) (any, bool) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	return c.inner.Get(key)
+func (l *Lru[K, V]) Get(k K) (v V) {
+	v, _ = l.GetExists(k)
+	return
 }
 
 // Del removes the provided key from the cache.
-func (c *Lru) Del(key Key) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.inner.Del(key)
+func (l *Lru[K, V]) Del(k K) {
+	if e, ok := l.C[k]; ok {
+		l.List.Remove(e)
+		delete(l.C, k)
+	}
 }
 
 // Len returns the number of items in the cache.
-func (c *Lru) Len() int {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	return c.inner.Len()
+func (l *Lru[K, V]) Len() int {
+	return l.List.Size
 }
 
-// Clr all
-func (c *Lru) Clr() {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.inner.Clr()
-}
-
-// NewLru creates a new Cache. If maxEntries is zero, the cache has no limit.
-func NewLru(maxEntries int) *Lru {
-	return &Lru{
-		MaxEntries: maxEntries,
-		inner:      NewNut(maxEntries),
-		mutex:      sync.Mutex{},
+// New returns a new LRU cache. If size is zero, the cache has no limit.
+func New[K comparable, V any](size int) *Lru[K, V] {
+	return &Lru[K, V]{
+		Size: size,
+		List: new(List[K, V]).Init(),
+		C:    map[K]*Elem[K, V]{},
 	}
 }
