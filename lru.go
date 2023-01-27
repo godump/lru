@@ -63,6 +63,7 @@ type Lru[K comparable, V any] struct {
 	C    map[K]*Elem[K, V]
 }
 
+// Set adds a value to the cache.
 func (l *Lru[K, V]) Set(k K, v V) {
 	if e, ok := l.C[k]; ok {
 		l.List.Move(e, &l.List.Root)
