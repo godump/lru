@@ -50,13 +50,16 @@ func TestLruDel(t *testing.T) {
 }
 
 func TestLruExpire(t *testing.T) {
-	c := New[string, int](4, time.Microsecond)
+	c := New[string, int](4, time.Microsecond*10)
 	c.Set("a", 1)
 	if c.Get("a") != 1 {
 		t.FailNow()
 	}
-	time.Sleep(time.Microsecond * 2)
+	time.Sleep(time.Microsecond * 20)
 	if c.Get("a") != 0 {
+		t.FailNow()
+	}
+	if a, b := c.GetExists("a"); a != 0 || b {
 		t.FailNow()
 	}
 }

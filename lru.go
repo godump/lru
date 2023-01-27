@@ -95,9 +95,13 @@ func (l *Lru[K, V]) GetExists(k K) (v V, ok bool) {
 	defer l.M.Unlock()
 	var e *Elem[K, V]
 	e, ok = l.C[k]
-	if ok && time.Since(e.U) < l.E {
-		l.List.Move(e, &l.List.Root)
-		v = e.V
+	if ok {
+		if time.Since(e.U) > l.E {
+			ok = !ok
+		} else {
+			l.List.Move(e, &l.List.Root)
+			v = e.V
+		}
 	}
 	return
 }
