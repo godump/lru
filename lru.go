@@ -1,6 +1,10 @@
 // Package lru implements an LRU cache.
 package lru
 
+import (
+	"sync"
+)
+
 // Elem is an element of a linked list.
 type Elem[K comparable, V any] struct {
 	Next, Prev *Elem[K, V]
@@ -54,17 +58,20 @@ func (l *List[K, V]) Remove(e *Elem[K, V]) {
 	l.Size--
 }
 
-// Lru cache. It is not safe for concurrent access.
+// Lru cache. It is safe for concurrent access.
 type Lru[K comparable, V any] struct {
 	// Size is the maximum number of cache entries before
 	// an item is evicted. Zero means no limit.
 	Size int
 	List *List[K, V]
 	C    map[K]*Elem[K, V]
+	M    *sync.Mutex
 }
 
 // Set adds a value to the cache.
 func (l *Lru[K, V]) Set(k K, v V) {
+	l.M.Lock()
+	defer l.M.Unlock()
 	if e, ok := l.C[k]; ok {
 		l.List.Move(e, &l.List.Root)
 		e.K = k
@@ -80,6 +87,8 @@ func (l *Lru[K, V]) Set(k K, v V) {
 
 // Get looks up a key's value from the cache.
 func (l *Lru[K, V]) GetExists(k K) (v V, ok bool) {
+	l.M.Lock()
+	defer l.M.Unlock()
 	var e *Elem[K, V]
 	e, ok = l.C[k]
 	if ok {
@@ -97,6 +106,8 @@ func (l *Lru[K, V]) Get(k K) (v V) {
 
 // Del removes the provided key from the cache.
 func (l *Lru[K, V]) Del(k K) {
+	l.M.Lock()
+	defer l.M.Unlock()
 	if e, ok := l.C[k]; ok {
 		l.List.Remove(e)
 		delete(l.C, k)
@@ -105,6 +116,8 @@ func (l *Lru[K, V]) Del(k K) {
 
 // Len returns the number of items in the cache.
 func (l *Lru[K, V]) Len() int {
+	l.M.Lock()
+	defer l.M.Unlock()
 	return l.List.Size
 }
 
@@ -114,5 +127,6 @@ func New[K comparable, V any](size int) *Lru[K, V] {
 		Size: size,
 		List: new(List[K, V]).Init(),
 		C:    map[K]*Elem[K, V]{},
+		M:    &sync.Mutex{},
 	}
 }
