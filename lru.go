@@ -3,6 +3,7 @@ package lru
 
 import (
 	"sync"
+	"time"
 )
 
 // Elem is an element of a linked list.
@@ -10,6 +11,7 @@ type Elem[K comparable, V any] struct {
 	Next, Prev *Elem[K, V]
 	K          K
 	V          V
+	U          time.Time
 }
 
 // List represents a doubly linked list.
@@ -65,6 +67,7 @@ type Lru[K comparable, V any] struct {
 	Size int
 	List *List[K, V]
 	C    map[K]*Elem[K, V]
+	E    time.Duration
 	M    *sync.Mutex
 }
 
@@ -76,9 +79,10 @@ func (l *Lru[K, V]) Set(k K, v V) {
 		l.List.Move(e, &l.List.Root)
 		e.K = k
 		e.V = v
+		e.U = time.Now()
 		return
 	}
-	l.C[k] = l.List.Insert(&Elem[K, V]{K: k, V: v}, &l.List.Root)
+	l.C[k] = l.List.Insert(&Elem[K, V]{K: k, V: v, U: time.Now()}, &l.List.Root)
 	if l.List.Size > l.Size {
 		delete(l.C, l.List.Root.Prev.K)
 		l.List.Remove(l.List.Root.Prev)
@@ -91,7 +95,7 @@ func (l *Lru[K, V]) GetExists(k K) (v V, ok bool) {
 	defer l.M.Unlock()
 	var e *Elem[K, V]
 	e, ok = l.C[k]
-	if ok {
+	if ok && time.Since(e.U) < l.E {
 		l.List.Move(e, &l.List.Root)
 		v = e.V
 	}
@@ -114,19 +118,13 @@ func (l *Lru[K, V]) Del(k K) {
 	}
 }
 
-// Len returns the number of items in the cache.
-func (l *Lru[K, V]) Len() int {
-	l.M.Lock()
-	defer l.M.Unlock()
-	return l.List.Size
-}
-
-// New returns a new LRU cache. If size is zero, the cache has no limit.
-func New[K comparable, V any](size int) *Lru[K, V] {
+// New returns a new LRU cache.
+func New[K comparable, V any](size int, expire time.Duration) *Lru[K, V] {
 	return &Lru[K, V]{
 		Size: size,
 		List: new(List[K, V]).Init(),
 		C:    map[K]*Elem[K, V]{},
+		E:    expire,
 		M:    &sync.Mutex{},
 	}
 }
